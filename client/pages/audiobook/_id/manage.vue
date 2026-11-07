@@ -18,54 +18,56 @@
       </div>
     </div>
 
-    <div class="flex justify-center mb-2">
-      <div class="w-full max-w-2xl">
-        <p class="text-lg">{{ $strings.HeaderMetadataToEmbed }}</p>
+    <template v-if="!isTtsTool">
+      <div class="flex justify-center mb-2">
+        <div class="w-full max-w-2xl">
+          <p class="text-lg">{{ $strings.HeaderMetadataToEmbed }}</p>
+        </div>
+        <div class="w-full max-w-2xl"></div>
       </div>
-      <div class="w-full max-w-2xl"></div>
-    </div>
 
-    <div class="flex justify-center flex-wrap lg:flex-nowrap gap-4">
-      <div class="w-full max-w-2xl border border-white/10 bg-bg">
-        <div class="flex py-2 px-4">
-          <div class="w-28 min-w-28 text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelMetaTag }}</div>
-          <div class="grow text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelValue }}</div>
-        </div>
-        <div class="w-full max-h-72 overflow-auto">
-          <template v-for="(value, key, index) in metadataObject">
-            <div :key="key" class="flex py-1 px-4 text-sm" :class="index % 2 === 0 ? 'bg-primary/25' : ''">
-              <div class="w-28 min-w-28 font-semibold">{{ key }}</div>
-              <div class="grow">
-                {{ value }}
+      <div class="flex justify-center flex-wrap lg:flex-nowrap gap-4">
+        <div class="w-full max-w-2xl border border-white/10 bg-bg">
+          <div class="flex py-2 px-4">
+            <div class="w-28 min-w-28 text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelMetaTag }}</div>
+            <div class="grow text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelValue }}</div>
+          </div>
+          <div class="w-full max-h-72 overflow-auto">
+            <template v-for="(value, key, index) in metadataObject">
+              <div :key="key" class="flex py-1 px-4 text-sm" :class="index % 2 === 0 ? 'bg-primary/25' : ''">
+                <div class="w-28 min-w-28 font-semibold">{{ key }}</div>
+                <div class="grow">
+                  {{ value }}
+                </div>
               </div>
-            </div>
-          </template>
+            </template>
+          </div>
+        </div>
+        <div class="w-full max-w-2xl border border-white/10 bg-bg">
+          <div class="flex py-2 px-4 bg-primary/25">
+            <div class="grow text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelChapterTitle }}</div>
+            <div class="w-16 min-w-16 text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelStart }}</div>
+            <div class="w-16 min-w-16 text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelEnd }}</div>
+          </div>
+          <div class="w-full max-h-72 overflow-auto">
+            <p v-if="!metadataChapters.length" class="py-5 text-center text-gray-200">{{ $strings.MessageNoChapters }}</p>
+            <template v-for="(chapter, index) in metadataChapters">
+              <div :key="index" class="flex py-1 px-4 text-sm" :class="index % 2 === 1 ? 'bg-primary/25' : ''">
+                <div class="grow font-semibold">{{ chapter.title }}</div>
+                <div class="w-16 min-w-16">
+                  {{ $secondsToTimestamp(chapter.start) }}
+                </div>
+                <div class="w-16 min-w-16">
+                  {{ $secondsToTimestamp(chapter.end) }}
+                </div>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
-      <div class="w-full max-w-2xl border border-white/10 bg-bg">
-        <div class="flex py-2 px-4 bg-primary/25">
-          <div class="grow text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelChapterTitle }}</div>
-          <div class="w-16 min-w-16 text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelStart }}</div>
-          <div class="w-16 min-w-16 text-xs font-semibold uppercase text-gray-200">{{ $strings.LabelEnd }}</div>
-        </div>
-        <div class="w-full max-h-72 overflow-auto">
-          <p v-if="!metadataChapters.length" class="py-5 text-center text-gray-200">{{ $strings.MessageNoChapters }}</p>
-          <template v-for="(chapter, index) in metadataChapters">
-            <div :key="index" class="flex py-1 px-4 text-sm" :class="index % 2 === 1 ? 'bg-primary/25' : ''">
-              <div class="grow font-semibold">{{ chapter.title }}</div>
-              <div class="w-16 min-w-16">
-                {{ $secondsToTimestamp(chapter.start) }}
-              </div>
-              <div class="w-16 min-w-16">
-                {{ $secondsToTimestamp(chapter.end) }}
-              </div>
-            </div>
-          </template>
-        </div>
-      </div>
-    </div>
 
-    <div class="w-full h-px bg-white/10 my-8" />
+      <div class="w-full h-px bg-white/10 my-8" />
+    </template>
 
     <div class="w-full max-w-4xl mx-auto">
       <!-- queued alert -->
@@ -582,6 +584,8 @@ export default {
       }
     },
     fetchMetadataEmbedObject() {
+      // PDF-only items (TTS) have no audio, the endpoint 400s
+      if (!this.audioFiles.length) return
       this.$axios
         .$get(`/api/items/${this.libraryItemId}/metadata-object`)
         .then((metadataObject) => {

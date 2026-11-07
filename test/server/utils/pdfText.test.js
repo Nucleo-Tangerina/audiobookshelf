@@ -1,6 +1,7 @@
 const { expect } = require('chai')
 
-const { cleanPages, splitSentences, buildChapters } = require('../../../server/utils/pdfText')
+const Path = require('path')
+const { cleanPages, splitSentences, buildChapters, extractPdfChapters } = require('../../../server/utils/pdfText')
 
 describe('pdfText', () => {
   describe('cleanPages', () => {
@@ -79,6 +80,16 @@ describe('pdfText', () => {
     it('skips chapters without text and numbers chapters consecutively', () => {
       expect(buildChapters(['', '', 'Texto.'], 2)).to.deep.equal([{ index: 1, sentences: [{ text: 'Texto.', page: 3 }] }])
       expect(buildChapters(['', ''], 10)).to.deep.equal([])
+    })
+  })
+
+  describe('extractPdfChapters', () => {
+    it('extracts chapters from a real PDF file', async () => {
+      // fixture lives in the source tree, tsc does not copy it to dist-server
+      const chapters = await extractPdfChapters(Path.resolve('test/fixtures/tts-sample.pdf'), 10)
+      expect(chapters).to.have.length(2)
+      expect(chapters[0].sentences[0].text).to.equal('O Sr. Silva chegou cedo.')
+      expect(chapters[0].sentences.some((s) => s.text.includes('Livro de Teste'))).to.be.false
     })
   })
 })

@@ -213,7 +213,9 @@ async function extractPdfChapters(pdfPath, pagesPerChapter = 10) {
   // Require the lib file directly, the package index runs a debug test when module.parent is unset
   const pdfParse = require('pdf-parse/lib/pdf-parse.js')
   const pages = []
-  await pdfParse(await fs.readFile(pdfPath), {
+  // pdf.js 1.10 throws "bad XRef entry" on the Buffer from async fs.readFile; a plain Uint8Array copy parses fine
+  const data = new Uint8Array(await fs.readFile(pdfPath))
+  await pdfParse(data, {
     pagerender: async (pageData) => {
       const text = await renderPage(pageData)
       pages[pageData.pageIndex] = text

@@ -410,6 +410,7 @@ class Server {
         '/audiobook/:id/chapters',
         '/audiobook/:id/edit',
         '/audiobook/:id/manage',
+        '/audiobook/:id/read-along',
         '/library/:library',
         '/library/:library/search',
         '/library/:library/bookshelf/:id?',

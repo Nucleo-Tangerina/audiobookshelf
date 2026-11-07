@@ -163,7 +163,7 @@ class TtsManager {
         }
 
         const chapterNumber = String(chapter.index).padStart(padLength, '0')
-        const filename = podcastLibraryItemId ? sanitizeFilename(`${bookTitle} - ${chapterNumber} - Chapter ${chapterNumber}.mp3`) : `${chapterNumber} - Chapter ${chapterNumber}.mp3`
+        const filename = podcastLibraryItemId ? sanitizeFilename(`${bookTitle} - ${chapterNumber} - Capítulo ${chapterNumber}.mp3`) : `${chapterNumber} - Capítulo ${chapterNumber}.mp3`
         task.data.tempFilepath = Path.join(itemCachePath, filename)
         task.data.ffmpeg = new Ffmpeg()
         await this.encodeChapter(tracks, Path.join(itemCachePath, 'files.txt'), task.data.tempFilepath, task.data.ffmpeg, {
