@@ -138,6 +138,7 @@
 <script>
 import Vue from 'vue'
 import MoreMenu from '@/components/widgets/MoreMenu'
+import { needsPdfCover, generatePdfCover } from '@/plugins/pdfCover'
 
 export default {
   props: {
@@ -566,6 +567,12 @@ export default {
           text: this.$strings.HeaderMatch
         })
       }
+      if (this.userIsAdminOrUp && !this.isFile && this.ebookFormat === 'pdf' && !this.numTracks) {
+        items.push({
+          func: 'generateAudiobook',
+          text: this.$strings.ButtonGenerateAudiobook
+        })
+      }
       if (this.userIsAdminOrUp && !this.isFile) {
         items.push({
           func: 'rescan',
@@ -692,6 +699,10 @@ export default {
 
       this.libraryItem = libraryItem
 
+      if (needsPdfCover(libraryItem, this.store.getters['user/getUserCanUpload'])) {
+        generatePdfCover(this.$axios || this.$nuxt.$axios, libraryItem.id)
+      }
+
       this.$nextTick(() => {
         if (this.$refs.displayTitle) {
           this.displayTitleTruncated = this.$refs.displayTitle.scrollWidth > this.$refs.displayTitle.clientWidth
@@ -785,6 +796,11 @@ export default {
         .finally(() => {
           this.processing = false
         })
+    },
+    generateAudiobook() {
+      // More menu func
+      const router = this.$router || this.$nuxt.$router
+      router.push(`/audiobook/${this.libraryItemId}/manage?tool=tts`)
     },
     showEditModalFiles() {
       // More menu func

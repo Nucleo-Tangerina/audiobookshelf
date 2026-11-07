@@ -96,6 +96,11 @@
               {{ $strings.ButtonRead }}
             </ui-btn>
 
+            <ui-btn v-if="showGenerateAudiobookButton" :to="`/audiobook/${libraryItemId}/manage?tool=tts`" color="bg-success" :padding-x="4" small class="flex items-center h-9 mr-2">
+              <span class="material-symbols text-2xl -ml-2 pr-2 text-white" aria-hidden="true">record_voice_over</span>
+              {{ $strings.ButtonGenerateAudiobook }}
+            </ui-btn>
+
             <ui-btn v-if="hasReadAlong" :to="`/audiobook/${libraryItemId}/read-along`" color="bg-info" :padding-x="4" small class="flex items-center h-9 mr-2">
               <span class="material-symbols text-2xl -ml-2 pr-2 text-white" aria-hidden="true">subject</span>
               {{ $strings.ButtonReadAlong }}
@@ -152,6 +157,8 @@
 </template>
 
 <script>
+import { needsPdfCover, generatePdfCover } from '@/plugins/pdfCover'
+
 export default {
   async asyncData({ store, params, app, redirect, route }) {
     if (!store.state.user.user) {
@@ -178,6 +185,7 @@ export default {
   },
   data() {
     return {
+      ttsEnabled: false,
       resettingProgress: false,
       isProcessingReadUpdate: false,
       fetchingRSSFeed: false,
@@ -241,6 +249,9 @@ export default {
     },
     showReadButton() {
       return this.ebookFile
+    },
+    showGenerateAudiobookButton() {
+      return this.ttsEnabled && this.isBook && !this.isFile && !this.tracks.length && this.ebookFile?.ebookFormat === 'pdf'
     },
     libraryId() {
       return this.libraryItem.libraryId
@@ -788,6 +799,15 @@ export default {
   mounted() {
     this.checkDescriptionClamped()
 
+    if (needsPdfCover(this.libraryItem, this.$store.getters['user/getUserCanUpload'])) {
+      generatePdfCover(this.$axios, this.libraryItemId)
+    }
+    if (this.userIsAdminOrUp && this.ebookFile?.ebookFormat === 'pdf') {
+      this.$axios
+        .$get('/api/tools/tts/status')
+        .then((s) => (this.ttsEnabled = !!s.enabled))
+        .catch(() => {})
+    }
     if (this.isBook && !this.isFile) {
       // 404 means the item has no TTS alignment, so the button stays hidden
       this.$axios
