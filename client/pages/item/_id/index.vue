@@ -96,6 +96,11 @@
               {{ $strings.ButtonRead }}
             </ui-btn>
 
+            <ui-btn v-if="hasReadAlong" :to="`/audiobook/${libraryItemId}/read-along`" color="bg-info" :padding-x="4" small class="flex items-center h-9 mr-2">
+              <span class="material-symbols text-2xl -ml-2 pr-2 text-white" aria-hidden="true">subject</span>
+              {{ $strings.ButtonReadAlong }}
+            </ui-btn>
+
             <ui-tooltip v-if="showQueueBtn" :text="isQueued ? $strings.ButtonQueueRemoveItem : $strings.ButtonQueueAddItem" direction="top">
               <ui-icon-btn :icon="isQueued ? 'playlist_add_check' : 'playlist_play'" :bg-color="isQueued ? 'bg-primary' : 'bg-success/60'" class="mx-0.5" :class="isQueued ? 'text-success' : ''" @click="queueBtnClick" />
             </ui-tooltip>
@@ -182,7 +187,8 @@ export default {
       episodeDownloadsQueued: [],
       showBookmarksModal: false,
       isDescriptionClamped: false,
-      showFullDescription: false
+      showFullDescription: false,
+      hasReadAlong: false
     }
   },
   computed: {
@@ -781,6 +787,14 @@ export default {
   },
   mounted() {
     this.checkDescriptionClamped()
+
+    if (this.isBook && !this.isFile) {
+      // 404 means the item has no TTS alignment, so the button stays hidden
+      this.$axios
+        .$get(`/api/items/${this.libraryItemId}/tts/alignment`)
+        .then(() => (this.hasReadAlong = true))
+        .catch(() => {})
+    }
 
     this.episodeDownloadsQueued = this.libraryItem.episodeDownloadsQueued || []
     this.episodesDownloading = this.libraryItem.episodesDownloading || []

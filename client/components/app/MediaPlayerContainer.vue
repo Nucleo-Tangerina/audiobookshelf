@@ -301,6 +301,7 @@ export default {
     },
     setCurrentTime(time) {
       this.currentTime = time
+      this.$eventBus.$emit('player-current-time', time)
       if (this.$refs.audioPlayer) {
         this.$refs.audioPlayer.setCurrentTime(time)
       }

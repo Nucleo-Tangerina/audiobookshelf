@@ -1,6 +1,9 @@
 const { expect } = require('chai')
 const { Sequelize } = require('sequelize')
 const sinon = require('sinon')
+const fs = require('fs')
+const os = require('os')
+const Path = require('path')
 
 const Database = require('../../../server/Database')
 const ApiRouter = require('../../../server/routers/ApiRouter')
@@ -297,6 +300,41 @@ describe('LibraryItemController', () => {
       }
       await LibraryItemController.batchDelete.bind(apiRouter)(fakeReq, fakeRes)
       expect(fakeRes.sendStatus.calledWith(403)).to.be.true
+    })
+  })
+
+  describe('getTtsAlignment', () => {
+    let itemDir
+
+    beforeEach(() => {
+      itemDir = fs.mkdtempSync(Path.join(os.tmpdir(), 'abs-alignment-'))
+    })
+
+    afterEach(() => {
+      fs.rmSync(itemDir, { recursive: true, force: true })
+    })
+
+    it('returns 404 when alignment.json is missing', async () => {
+      const fakeRes = { sendStatus: sinon.spy(), json: sinon.spy() }
+      await LibraryItemController.getTtsAlignment.bind(apiRouter)({ libraryItem: { isFile: false, path: itemDir } }, fakeRes)
+      expect(fakeRes.sendStatus.calledWith(404)).to.be.true
+      expect(fakeRes.json.called).to.be.false
+    })
+
+    it('returns 404 for single-file items', async () => {
+      const fakeRes = { sendStatus: sinon.spy(), json: sinon.spy() }
+      await LibraryItemController.getTtsAlignment.bind(apiRouter)({ libraryItem: { isFile: true, path: Path.join(itemDir, 'book.mp3') } }, fakeRes)
+      expect(fakeRes.sendStatus.calledWith(404)).to.be.true
+    })
+
+    it('returns the alignment JSON when present', async () => {
+      const alignment = [{ chapter: 1, file: '01 - Chapter 01.mp3', start: 0, end: 2.5, page: 1, text: 'Olá, mundo.' }]
+      fs.mkdirSync(Path.join(itemDir, 'tts'))
+      fs.writeFileSync(Path.join(itemDir, 'tts', 'alignment.json'), JSON.stringify(alignment))
+      const fakeRes = { sendStatus: sinon.spy(), json: sinon.spy() }
+      await LibraryItemController.getTtsAlignment.bind(apiRouter)({ libraryItem: { isFile: false, path: itemDir } }, fakeRes)
+      expect(fakeRes.sendStatus.called).to.be.false
+      expect(fakeRes.json.firstCall.args[0]).to.deep.equal(alignment)
     })
   })
 })

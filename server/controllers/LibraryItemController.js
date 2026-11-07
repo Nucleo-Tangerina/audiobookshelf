@@ -1212,6 +1212,30 @@ class LibraryItemController {
   }
 
   /**
+   * GET api/items/:id/tts/alignment
+   * Sentence timings written by TtsManager, used for guided reading (read-along)
+   *
+   * @param {LibraryItemControllerRequest} req
+   * @param {Response} res
+   */
+  async getTtsAlignment(req, res) {
+    if (req.libraryItem.isFile) {
+      return res.sendStatus(404)
+    }
+    const alignmentPath = Path.join(req.libraryItem.path, 'tts', 'alignment.json')
+    if (!(await fs.pathExists(alignmentPath))) {
+      return res.sendStatus(404)
+    }
+
+    try {
+      res.json(JSON.parse(await fs.readFile(alignmentPath, 'utf8')))
+    } catch (error) {
+      Logger.error(`[LibraryItemController] Failed to read TTS alignment "${alignmentPath}"`, error)
+      res.sendStatus(500)
+    }
+  }
+
+  /**
    *
    * @param {RequestWithUser} req
    * @param {Response} res
