@@ -1,7 +1,10 @@
 const { Request, Response, NextFunction } = require('express')
 const Logger = require('../Logger')
 const Database = require('../Database')
+const Path = require('path')
+const fs = require('../libs/fsExtra')
 const ttsEngine = require('../utils/ttsEngine')
+const ttsBeds = require('../utils/ttsBeds')
 
 /**
  * @typedef RequestUserObject
@@ -145,6 +148,31 @@ class ToolsController {
       return res.status(400).send('Invalid request: pagesPerChapter must be a positive integer')
     }
 
+    const { bed = null, bedVolume = 0.15, output = 'audiobook', podcastLibraryItemId } = req.body || {}
+    let bedPath = null
+    if (bed !== null) {
+      bedPath = ttsBeds.getBedPath(bed)
+      if (!bedPath || !(await fs.pathExists(bedPath))) {
+        return res.status(400).send('Invalid request: bed not found')
+      }
+    }
+    if (typeof bedVolume !== 'number' || !Number.isFinite(bedVolume) || bedVolume < 0 || bedVolume > 1) {
+      return res.status(400).send('Invalid request: bedVolume must be a number between 0 and 1')
+    }
+    if (output !== 'audiobook' && output !== 'podcast') {
+      return res.status(400).send('Invalid request: output must be "audiobook" or "podcast"')
+    }
+    let podcastLibraryItem = null
+    if (output === 'podcast') {
+      if (!podcastLibraryItemId || typeof podcastLibraryItemId !== 'string') {
+        return res.status(400).send('Invalid request: podcastLibraryItemId is required')
+      }
+      podcastLibraryItem = await Database.libraryItemModel.getExpandedById(podcastLibraryItemId)
+      if (!podcastLibraryItem?.media || podcastLibraryItem.mediaType !== 'podcast' || podcastLibraryItem.isMissing || !req.user.checkCanAccessLibraryItem(podcastLibraryItem)) {
+        return res.status(400).send('Invalid request: podcast library item not found')
+      }
+    }
+
     if (this.ttsManager.getPendingTaskByLibraryItemId(req.libraryItem.id)) {
       return res.status(400).send('Library item is already processing')
     }
@@ -154,7 +182,7 @@ class ToolsController {
     }
 
     Logger.info(`[ToolsController] generateTts: Starting TTS for "${req.libraryItem.media.title}"`)
-    this.ttsManager.startTts(req.user.id, req.libraryItem, { voiceId, language, pagesPerChapter })
+    this.ttsManager.startTts(req.user.id, req.libraryItem, { voiceId, language, pagesPerChapter, bedPath, bedVolume, podcastLibraryItem })
 
     res.sendStatus(200)
   }
@@ -174,6 +202,72 @@ class ToolsController {
 
     this.ttsManager.cancel(workerTask.task)
 
+    res.sendStatus(200)
+  }
+
+  /**
+   * GET: /api/tools/tts/beds
+   * List background music beds
+   *
+   * @param {RequestWithUser} req
+   * @param {Response} res
+   */
+  async getTtsBeds(req, res) {
+    const bedsDir = ttsBeds.getBedsDir()
+    await fs.ensureDir(bedsDir)
+    const beds = []
+    for (const name of await fs.readdir(bedsDir)) {
+      const bedPath = ttsBeds.getBedPath(name)
+      if (!bedPath) continue
+      const stat = await fs.stat(bedPath)
+      if (stat.isFile()) beds.push({ name, size: stat.size })
+    }
+    res.json({ beds })
+  }
+
+  /**
+   * POST: /api/tools/tts/beds
+   * Upload a background music bed (multipart field "audio")
+   *
+   * @param {RequestWithUser} req
+   * @param {Response} res
+   */
+  async uploadTtsBed(req, res) {
+    const file = req.files?.audio
+    if (!file || Array.isArray(file)) {
+      return res.status(400).send('Invalid request: audio file is required')
+    }
+    const bedPath = ttsBeds.getBedPath(file.name)
+    let error = null
+    if (!bedPath) error = [400, `Invalid file: allowed types are ${ttsBeds.BED_EXTENSIONS.join(', ')}`]
+    else if (file.size > ttsBeds.MAX_BED_SIZE) error = [413, 'File too large']
+    if (error) {
+      if (file.tempFilePath) await fs.remove(file.tempFilePath).catch(() => {})
+      return res.status(error[0]).send(error[1])
+    }
+
+    await fs.ensureDir(ttsBeds.getBedsDir())
+    try {
+      await file.mv(bedPath)
+    } catch (err) {
+      Logger.error(`[ToolsController] uploadTtsBed: Failed to save bed "${file.name}"`, err)
+      return res.status(500).send('Failed to save file')
+    }
+    Logger.info(`[ToolsController] uploadTtsBed: Saved bed "${Path.basename(bedPath)}"`)
+    res.json({ name: Path.basename(bedPath), size: file.size })
+  }
+
+  /**
+   * DELETE: /api/tools/tts/beds/:name
+   *
+   * @param {RequestWithUser} req
+   * @param {Response} res
+   */
+  async deleteTtsBed(req, res) {
+    const bedPath = ttsBeds.getBedPath(req.params.name)
+    if (!bedPath) return res.status(400).send('Invalid bed name')
+    if (!(await fs.pathExists(bedPath))) return res.sendStatus(404)
+    await fs.remove(bedPath)
     res.sendStatus(200)
   }
 

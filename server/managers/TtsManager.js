@@ -9,8 +9,9 @@ const ffmpegHelpers = require('../utils/ffmpegHelpers')
 const Ffmpeg = require('../libs/fluentFfmpeg')
 const SocketAuthority = require('../SocketAuthority')
 const LibraryItemScanner = require('../scanner/LibraryItemScanner')
-const { isWritable } = require('../utils/fileUtils')
+const { isWritable, sanitizeFilename } = require('../utils/fileUtils')
 const ttsEngine = require('../utils/ttsEngine')
+const { buildBedMixFilter } = require('../utils/ttsBeds')
 const pdfText = require('../utils/pdfText')
 
 /**
@@ -18,6 +19,9 @@ const pdfText = require('../utils/pdfText')
  * @property {string} voiceId
  * @property {string} [language]
  * @property {number} [pagesPerChapter]
+ * @property {string|null} [bedPath] background music file, mixed under the voice
+ * @property {number} [bedVolume]
+ * @property {import('../models/LibraryItem')|null} [podcastLibraryItem] when set, chapters become episodes of this podcast
  */
 
 class TtsManager {
@@ -68,6 +72,12 @@ class TtsManager {
       voiceId: options.voiceId,
       language: options.language || process.env.TTS_DEFAULT_LANGUAGE || 'pt',
       pagesPerChapter: options.pagesPerChapter || 10,
+      bookTitle: libraryItem.media.title,
+      bedPath: options.bedPath || null,
+      bedVolume: options.bedVolume ?? 0.15,
+      podcastLibraryItemId: options.podcastLibraryItem?.id || null,
+      // Chapter audio goes to the podcast item folder in podcast mode
+      outputDir: options.podcastLibraryItem?.path || libraryItem.path,
       itemCachePath: Path.join(this.ttsCacheDir, libraryItem.id),
       tempFilepath: null,
       canceled: false
@@ -96,10 +106,14 @@ class TtsManager {
    * @param {Task} task
    */
   async runTts(task) {
-    const { libraryItemId, libraryItemDir, itemCachePath, voiceId, language } = task.data
+    const { libraryItemId, libraryItemDir, itemCachePath, voiceId, language, outputDir, podcastLibraryItemId, bookTitle } = task.data
 
-    if (!(await isWritable(libraryItemDir))) {
-      Logger.error(`[TtsManager] Target directory is not writable: ${libraryItemDir}`)
+    let notWritableDir = null
+    for (const dir of new Set([libraryItemDir, outputDir])) {
+      if (!notWritableDir && !(await isWritable(dir))) notWritableDir = dir
+    }
+    if (notWritableDir) {
+      Logger.error(`[TtsManager] Target directory is not writable: ${notWritableDir}`)
       task.setFailed({
         text: 'Target directory is not writable',
         key: 'MessageTaskTargetDirectoryNotWritable'
@@ -108,7 +122,8 @@ class TtsManager {
       return
     }
 
-    Watcher.addIgnoreDir(libraryItemDir)
+    // Only the audio dir: Watcher keeps one removal timer, so a second ignored dir could stay ignored
+    Watcher.addIgnoreDir(outputDir)
     try {
       await fs.ensureDir(itemCachePath)
       const chapters = await pdfText.extractPdfChapters(task.data.ebookPath, task.data.pagesPerChapter)
@@ -148,12 +163,18 @@ class TtsManager {
         }
 
         const chapterNumber = String(chapter.index).padStart(padLength, '0')
-        const filename = `${chapterNumber} - Chapter ${chapterNumber}.mp3`
+        const filename = podcastLibraryItemId ? sanitizeFilename(`${bookTitle} - ${chapterNumber} - Chapter ${chapterNumber}.mp3`) : `${chapterNumber} - Chapter ${chapterNumber}.mp3`
         task.data.tempFilepath = Path.join(itemCachePath, filename)
         task.data.ffmpeg = new Ffmpeg()
-        await this.encodeChapter(tracks, Path.join(itemCachePath, 'files.txt'), task.data.tempFilepath, task.data.ffmpeg)
+        await this.encodeChapter(tracks, Path.join(itemCachePath, 'files.txt'), task.data.tempFilepath, task.data.ffmpeg, {
+          bedPath: task.data.bedPath,
+          bedVolume: task.data.bedVolume,
+          duration: chapterTime,
+          // Podcast scanner uses the title tag as episode title
+          title: podcastLibraryItemId ? `${bookTitle} – Capítulo ${chapterNumber}` : null
+        })
         delete task.data.ffmpeg
-        await fs.move(task.data.tempFilepath, Path.join(libraryItemDir, filename), { overwrite: true })
+        await fs.move(task.data.tempFilepath, Path.join(outputDir, filename), { overwrite: true })
         task.data.tempFilepath = null
         alignment.filter((a) => a.chapter === chapter.index).forEach((a) => (a.file = filename))
       }
@@ -172,7 +193,8 @@ class TtsManager {
       return
     }
 
-    await LibraryItemScanner.scanLibraryItem(libraryItemId)
+    // Rescan creates a podcast episode for each new audio file
+    await LibraryItemScanner.scanLibraryItem(podcastLibraryItemId || libraryItemId)
 
     task.setFinished()
     await this.removeTask(task, false)
@@ -180,20 +202,29 @@ class TtsManager {
   }
 
   /**
-   * Concat sentence wavs into one mp3
+   * Concat sentence wavs into one mp3, optionally mixed with a looped background bed
    *
    * @param {{index:number, duration:number, metadata:{path:string}}[]} tracks
    * @param {string} concatFilePath
    * @param {string} outputPath
    * @param {import('../libs/fluentFfmpeg/index').FfmpegCommand} ffmpeg
+   * @param {{bedPath?:string|null, bedVolume?:number, duration?:number, title?:string|null}} [options]
    * @returns {Promise<void>}
    */
-  async encodeChapter(tracks, concatFilePath, outputPath, ffmpeg) {
+  async encodeChapter(tracks, concatFilePath, outputPath, ffmpeg, options = {}) {
     if ((await ffmpegHelpers.writeConcatFile(tracks, concatFilePath)) == null) {
       throw new Error('Failed to write concat file')
     }
     ffmpeg.input(concatFilePath).inputOptions(['-safe 0', '-f concat'])
-    ffmpeg.outputOptions(['-map 0:a', '-acodec libmp3lame', '-b:a 128k'])
+    if (options.bedPath) {
+      ffmpeg.input(options.bedPath).inputOptions(['-stream_loop -1'])
+      ffmpeg.complexFilter(buildBedMixFilter(options.bedVolume, options.duration))
+      // -t guards against the infinite bed input outliving the voice
+      ffmpeg.outputOptions(['-map [out]', `-t ${options.duration.toFixed(3)}`, '-acodec libmp3lame', '-b:a 128k'])
+    } else {
+      ffmpeg.outputOptions(['-map 0:a', '-acodec libmp3lame', '-b:a 128k'])
+    }
+    if (options.title) ffmpeg.addOption('-metadata', `title=${options.title}`)
     ffmpeg.output(outputPath)
 
     return new Promise((resolve, reject) => {
@@ -238,7 +269,7 @@ class TtsManager {
       })
     }
 
-    Watcher.removeIgnoreDir(task.data.libraryItemDir)
+    Watcher.removeIgnoreDir(task.data.outputDir)
     TaskManager.taskFinished(task)
   }
 }
