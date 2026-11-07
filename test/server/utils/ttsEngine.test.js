@@ -3,7 +3,7 @@ const sinon = require('sinon')
 const axios = require('axios')
 
 const Logger = require('../../../server/Logger')
-const { getWavDuration, listVoices } = require('../../../server/utils/ttsEngine')
+const { getWavDuration, listVoices, synthesize } = require('../../../server/utils/ttsEngine')
 
 function makeWav({ sampleRate = 24000, channels = 1, bitsPerSample = 16, seconds = 1.5, extraChunk = false, dataSizeOverride = null } = {}) {
   const byteRate = (sampleRate * channels * bitsPerSample) / 8
@@ -30,6 +30,23 @@ function makeWav({ sampleRate = 24000, channels = 1, bitsPerSample = 16, seconds
 }
 
 describe('ttsEngine', () => {
+  describe('synthesize', () => {
+    afterEach(() => {
+      delete process.env.TTS_ENGINE_MODEL_SIZE
+      sinon.restore()
+    })
+
+    it('sends model_size only when TTS_ENGINE_MODEL_SIZE is set', async () => {
+      const post = sinon.stub(axios, 'post').resolves({ data: new ArrayBuffer(4) })
+      await synthesize({ text: 'Olá.', voiceId: 'v1', language: 'pt' })
+      expect(post.firstCall.args[1]).to.deep.equal({ profile_id: 'v1', text: 'Olá.', language: 'pt' })
+
+      process.env.TTS_ENGINE_MODEL_SIZE = '0.6B'
+      await synthesize({ text: 'Olá.', voiceId: 'v1', language: 'pt' })
+      expect(post.secondCall.args[1].model_size).to.equal('0.6B')
+    })
+  })
+
   describe('listVoices', () => {
     afterEach(() => sinon.restore())
 

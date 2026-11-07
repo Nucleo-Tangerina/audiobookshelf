@@ -51,7 +51,8 @@ module.exports.listVoices = listVoices
 async function synthesize({ text, voiceId, language }) {
   const response = await axios.post(
     `${getBaseUrl()}/generate/stream`,
-    { profile_id: voiceId, text, language },
+    // Voicebox defaults Qwen to 1.7B (~7 GB RAM on CPU); TTS_ENGINE_MODEL_SIZE=0.6B fits small machines. Engines without sizes ignore it
+    { profile_id: voiceId, text, language, ...(process.env.TTS_ENGINE_MODEL_SIZE ? { model_size: process.env.TTS_ENGINE_MODEL_SIZE } : {}) },
     {
       headers: getHeaders(),
       responseType: 'arraybuffer',

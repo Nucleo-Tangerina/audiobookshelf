@@ -71,6 +71,8 @@ Config (env, lida em `server/` junto das outras):
 - `TTS_ENGINE_URL` (vazio = feature desligada, UI esconde os botões)
 - `TTS_ENGINE_API_KEY` (opcional)
 - `TTS_DEFAULT_LANGUAGE` (padrão `pt`)
+- `TTS_ENGINE_MODEL_SIZE` (opcional, ex.: `0.6B`; Voicebox usa Qwen 1.7B por padrão, ~7 GB de RAM em CPU)
+- Voicebox via `docker compose` publica na porta **17600** do host (não 17493)
 
 ## 4. Mapa do código ABS (pontos de encaixe)
 
