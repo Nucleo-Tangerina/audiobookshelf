@@ -89,6 +89,7 @@
           <ui-dropdown v-model="ttsLanguage" :items="ttsLanguageItems" :label="$strings.LabelLanguage" :disabled="processing" class="m-2 max-w-xs" />
           <ui-text-input-with-label v-model="ttsPagesPerChapter" type="number" min="1" :label="$strings.LabelPagesPerChapter" :disabled="processing" class="m-2 max-w-40" />
         </div>
+        <nuxt-link v-if="ttsVoicesLoaded && !ttsVoices.length" to="/config/voices" class="block mb-4 text-blue-400 hover:underline">{{ $strings.MessageNoVoicesCloneYours }}</nuxt-link>
         <div class="flex items-center">
           <div class="grow" />
           <ui-btn v-if="!isTaskFinished && processing" color="bg-error" :loading="isCancelingEncode" class="mr-2" @click.stop="cancelTtsClick">{{ $strings.ButtonCancel }}</ui-btn>
@@ -246,6 +247,7 @@ export default {
       isCancelingEncode: false,
       shouldBackupAudioFiles: true,
       ttsVoices: [],
+      ttsVoicesLoaded: false,
       ttsVoiceId: null,
       ttsLanguage: 'pt',
       ttsPagesPerChapter: 10,
@@ -451,6 +453,7 @@ export default {
         .$get('/api/tools/tts/voices')
         .then((data) => {
           this.ttsVoices = data.voices || []
+          this.ttsVoicesLoaded = true
           if (!this.ttsVoiceId && this.ttsVoices.length) this.ttsVoiceId = this.ttsVoices[0].id
         })
         .catch((error) => {

@@ -306,6 +306,8 @@ class ApiRouter {
     this.router.delete('/tools/item/:id/encode-m4b', ToolsController.middleware.bind(this), ToolsController.cancelM4bEncode.bind(this))
     this.router.get('/tools/tts/status', ToolsController.middleware.bind(this), ToolsController.getTtsStatus.bind(this))
     this.router.get('/tools/tts/voices', ToolsController.middleware.bind(this), ToolsController.getTtsVoices.bind(this))
+    this.router.post('/tools/tts/voices', ToolsController.middleware.bind(this), fileUploadParser, ToolsController.createTtsVoice.bind(this))
+    this.router.delete('/tools/tts/voices/:voiceId', ToolsController.middleware.bind(this), ToolsController.deleteTtsVoice.bind(this))
     this.router.post('/tools/item/:id/tts', ToolsController.middleware.bind(this), ToolsController.generateTts.bind(this))
     this.router.delete('/tools/item/:id/tts', ToolsController.middleware.bind(this), ToolsController.cancelTts.bind(this))
     this.router.post('/tools/item/:id/embed-metadata', ToolsController.middleware.bind(this), ToolsController.embedAudioFileMetadata.bind(this))

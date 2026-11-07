@@ -2,6 +2,11 @@ const { Request, Response, NextFunction } = require('express')
 const Logger = require('../Logger')
 const Database = require('../Database')
 const ttsEngine = require('../utils/ttsEngine')
+const Path = require('path')
+const fs = require('../libs/fsExtra')
+const Ffmpeg = require('../libs/fluentFfmpeg')
+
+const VOICE_SAMPLE_MAX_SIZE = 20 * 1024 * 1024
 
 /**
  * @typedef RequestUserObject
@@ -98,6 +103,66 @@ class ToolsController {
     } catch (error) {
       Logger.error(`[ToolsController] getTtsVoices: TTS engine request failed`, error.message)
       res.status(503).send('TTS engine unreachable')
+    }
+  }
+
+  /**
+   * POST: /api/tools/tts/voices
+   * Clone a voice from an uploaded sample (multipart: name, language, consent, file "audio").
+   * The sample is only kept by the TTS engine, never stored in ABS.
+   *
+   * @param {RequestWithUser} req
+   * @param {Response} res
+   */
+  async createTtsVoice(req, res) {
+    const audio = req.files?.audio
+    let wavPath = null
+    try {
+      if (!process.env.TTS_ENGINE_URL) return res.status(503).send('TTS is not enabled')
+      const { name, language = 'pt', consent } = req.body || {}
+      if (consent !== 'true') return res.status(400).send('Consent is required to clone a voice')
+      if (!name?.trim() || name.trim().length > 100) return res.status(400).send('Invalid request: name is required')
+      if (!/^[a-z]{2}$/.test(language)) return res.status(400).send('Invalid request: invalid language')
+      if (!audio || Array.isArray(audio)) return res.status(400).send('Invalid request: audio file is required')
+      if (audio.truncated || audio.size > VOICE_SAMPLE_MAX_SIZE) return res.status(400).send('Invalid request: audio file is too large')
+      // MediaRecorder may label an audio-only webm as video/webm
+      if (!audio.mimetype?.startsWith('audio/') && audio.mimetype !== 'video/webm') return res.status(400).send('Invalid request: not an audio file')
+
+      // Normalize browser webm/opus and other uploads to wav, Voicebox rejects samples over 30 s
+      const voicesCacheDir = Path.join(global.MetadataPath, 'cache/tts/voices')
+      await fs.ensureDir(voicesCacheDir)
+      wavPath = Path.join(voicesCacheDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.wav`)
+      await new Promise((resolve, reject) => {
+        Ffmpeg(audio.tempFilePath).noVideo().audioChannels(1).audioFrequency(24000).duration(30).output(wavPath).on('end', resolve).on('error', reject).run()
+      })
+
+      const voice = await ttsEngine.createVoice({ name: name.trim(), language, audioBuffer: await fs.readFile(wavPath), filename: 'sample.wav' })
+      Logger.info(`[ToolsController] createTtsVoice: User "${req.user.username}" created voice "${voice.name}" (${voice.id})`)
+      res.json({ voice })
+    } catch (error) {
+      Logger.error(`[ToolsController] createTtsVoice: failed`, error.message)
+      res.status(500).send(`Failed to create voice: ${error.message}`)
+    } finally {
+      if (audio?.tempFilePath) await fs.remove(audio.tempFilePath).catch(() => {})
+      if (wavPath) await fs.remove(wavPath).catch(() => {})
+    }
+  }
+
+  /**
+   * DELETE: /api/tools/tts/voices/:voiceId
+   *
+   * @param {RequestWithUser} req
+   * @param {Response} res
+   */
+  async deleteTtsVoice(req, res) {
+    if (!process.env.TTS_ENGINE_URL) return res.status(503).send('TTS is not enabled')
+    try {
+      await ttsEngine.deleteVoice(req.params.voiceId)
+      Logger.info(`[ToolsController] deleteTtsVoice: User "${req.user.username}" deleted voice ${req.params.voiceId}`)
+      res.sendStatus(200)
+    } catch (error) {
+      Logger.error(`[ToolsController] deleteTtsVoice: failed`, error.message)
+      res.status(error.response?.status === 404 ? 404 : 500).send('Failed to delete voice')
     }
   }
 

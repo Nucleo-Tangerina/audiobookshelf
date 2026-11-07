@@ -65,3 +65,62 @@ function getWavDuration(buffer) {
   throw new Error('WAV has no data chunk')
 }
 module.exports.getWavDuration = getWavDuration
+
+/**
+ * Multipart POST with native fetch, axios 0.27 cannot send a native FormData
+ *
+ * @param {string} path
+ * @param {FormData} form
+ * @returns {Promise<any>} parsed JSON response
+ */
+async function postForm(path, form) {
+  const response = await fetch(`${getBaseUrl()}${path}`, { method: 'POST', headers: getHeaders(), body: form, signal: AbortSignal.timeout(10 * 60 * 1000) })
+  const body = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(typeof body?.detail === 'string' ? body.detail : `TTS engine returned ${response.status}`)
+  return body
+}
+
+/**
+ * Clone a voice from one sample: transcribe it, create a profile, attach the sample with its transcript.
+ * Contract from jamiepine/voicebox backend/routes/profiles.py (POST /profiles, POST /profiles/{id}/samples needs reference_text, max 30 s) and backend/routes/transcription.py (POST /transcribe)
+ *
+ * @param {{name:string, language:string, audioBuffer:Buffer, filename:string}} params
+ * @returns {Promise<{id:string, name:string}>}
+ */
+async function createVoice({ name, language, audioBuffer, filename }) {
+  const makeForm = () => {
+    const form = new FormData()
+    form.append('file', new Blob([audioBuffer]), filename)
+    return form
+  }
+
+  const transcribeForm = makeForm()
+  transcribeForm.append('language', language)
+  const { text } = await postForm('/transcribe', transcribeForm)
+  if (!text?.trim()) throw new Error('No speech detected in the sample')
+
+  const response = await axios.post(`${getBaseUrl()}/profiles`, { name, language }, { headers: getHeaders(), timeout: 15000 })
+  const profile = response.data
+
+  try {
+    const sampleForm = makeForm()
+    sampleForm.append('reference_text', text.trim())
+    await postForm(`/profiles/${encodeURIComponent(profile.id)}/samples`, sampleForm)
+  } catch (error) {
+    // A profile without a sample cannot speak, do not leave it behind
+    await deleteVoice(profile.id).catch(() => {})
+    throw error
+  }
+  return { id: profile.id, name: profile.name }
+}
+module.exports.createVoice = createVoice
+
+/**
+ * Contract from jamiepine/voicebox backend/routes/profiles.py (DELETE /profiles/{profile_id})
+ *
+ * @param {string} id
+ */
+async function deleteVoice(id) {
+  await axios.delete(`${getBaseUrl()}/profiles/${encodeURIComponent(id)}`, { headers: getHeaders(), timeout: 15000 })
+}
+module.exports.deleteVoice = deleteVoice
