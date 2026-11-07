@@ -48,7 +48,21 @@
       </widgets-alert>
     </div>
 
-    <p v-if="!mediaTracks.length" class="text-lg text-center my-8">{{ $strings.MessageNoAudioTracks }}</p>
+    <!-- Generate audiobook from PDF (TTS) -->
+    <div v-if="showTtsGenerate" class="w-full border border-black-200 p-4 my-8">
+      <div class="flex flex-wrap items-center">
+        <p class="text-lg">{{ $strings.HeaderTtsGenerate }}</p>
+        <div class="grow" />
+        <div>
+          <ui-btn :to="`/audiobook/${libraryItemId}/manage?tool=tts`" class="flex items-center"
+            >{{ $strings.ButtonOpenManager }}
+            <span class="material-symbols text-lg ml-2">launch</span>
+          </ui-btn>
+        </div>
+      </div>
+    </div>
+
+    <p v-if="!mediaTracks.length && !showTtsGenerate" class="text-lg text-center my-8">{{ $strings.MessageNoAudioTracks }}</p>
   </div>
 </template>
 
@@ -62,7 +76,9 @@ export default {
     }
   },
   data() {
-    return {}
+    return {
+      ttsEnabled: false
+    }
   },
   computed: {
     libraryItemId() {
@@ -80,6 +96,9 @@ export default {
     showM4bDownload() {
       if (!this.mediaTracks.length) return false
       return true
+    },
+    showTtsGenerate() {
+      return this.ttsEnabled && this.$store.getters['user/getIsAdminOrUp'] && this.libraryItem?.mediaType === 'book' && this.media.ebookFile?.ebookFormat === 'pdf'
     },
     queuedEmbedLIds() {
       return this.$store.state.tasks.queuedEmbedLIds || []
@@ -124,6 +143,14 @@ export default {
       }
       this.$store.commit('globals/setConfirmPrompt', payload)
     }
+  },
+  mounted() {
+    this.$axios
+      .$get('/api/tools/tts/status')
+      .then((data) => {
+        this.ttsEnabled = !!data?.enabled
+      })
+      .catch(() => {})
   }
 }
 </script>

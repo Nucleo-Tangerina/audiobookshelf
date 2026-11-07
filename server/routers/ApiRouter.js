@@ -45,6 +45,8 @@ class ApiRouter {
     this.playbackSessionManager = Server.playbackSessionManager
     /** @type {import('../managers/AbMergeManager')} */
     this.abMergeManager = Server.abMergeManager
+    /** @type {import('../managers/TtsManager')} */
+    this.ttsManager = Server.ttsManager
     /** @type {import('../managers/BackupManager')} */
     this.backupManager = Server.backupManager
     /** @type {import('../managers/PodcastManager')} */
@@ -302,6 +304,10 @@ class ApiRouter {
     //
     this.router.post('/tools/item/:id/encode-m4b', ToolsController.middleware.bind(this), ToolsController.encodeM4b.bind(this))
     this.router.delete('/tools/item/:id/encode-m4b', ToolsController.middleware.bind(this), ToolsController.cancelM4bEncode.bind(this))
+    this.router.get('/tools/tts/status', ToolsController.middleware.bind(this), ToolsController.getTtsStatus.bind(this))
+    this.router.get('/tools/tts/voices', ToolsController.middleware.bind(this), ToolsController.getTtsVoices.bind(this))
+    this.router.post('/tools/item/:id/tts', ToolsController.middleware.bind(this), ToolsController.generateTts.bind(this))
+    this.router.delete('/tools/item/:id/tts', ToolsController.middleware.bind(this), ToolsController.cancelTts.bind(this))
     this.router.post('/tools/item/:id/embed-metadata', ToolsController.middleware.bind(this), ToolsController.embedAudioFileMetadata.bind(this))
     this.router.post('/tools/batch/embed-metadata', ToolsController.middleware.bind(this), ToolsController.batchEmbedMetadata.bind(this))
 

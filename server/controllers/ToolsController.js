@@ -1,6 +1,7 @@
 const { Request, Response, NextFunction } = require('express')
 const Logger = require('../Logger')
 const Database = require('../Database')
+const ttsEngine = require('../utils/ttsEngine')
 
 /**
  * @typedef RequestUserObject
@@ -68,6 +69,110 @@ class ToolsController {
     if (!workerTask) return res.sendStatus(404)
 
     this.abMergeManager.cancelEncode(workerTask.task)
+
+    res.sendStatus(200)
+  }
+
+  /**
+   * GET: /api/tools/tts/status
+   * TTS is enabled when TTS_ENGINE_URL is set
+   *
+   * @param {RequestWithUser} req
+   * @param {Response} res
+   */
+  async getTtsStatus(req, res) {
+    res.json({ enabled: !!process.env.TTS_ENGINE_URL })
+  }
+
+  /**
+   * GET: /api/tools/tts/voices
+   * List voices from the TTS engine
+   *
+   * @param {RequestWithUser} req
+   * @param {Response} res
+   */
+  async getTtsVoices(req, res) {
+    if (!process.env.TTS_ENGINE_URL) return res.status(503).send('TTS is not enabled')
+    try {
+      res.json({ voices: await ttsEngine.listVoices() })
+    } catch (error) {
+      Logger.error(`[ToolsController] getTtsVoices: TTS engine request failed`, error.message)
+      res.status(503).send('TTS engine unreachable')
+    }
+  }
+
+  /**
+   * POST: /api/tools/item/:id/tts
+   * Start a TTS task generating audio files from the item's PDF ebook
+   *
+   * @this import('../routers/ApiRouter')
+   *
+   * @param {RequestWithLibraryItem} req
+   * @param {Response} res
+   */
+  async generateTts(req, res) {
+    if (!process.env.TTS_ENGINE_URL) {
+      return res.status(400).send('TTS is not enabled')
+    }
+
+    if (req.libraryItem.isMissing || req.libraryItem.isInvalid) {
+      Logger.error(`[ToolsController] generateTts: library item not found or invalid ${req.params.id}`)
+      return res.status(404).send('Library item not found')
+    }
+
+    if (!req.libraryItem.isBook) {
+      Logger.error(`[ToolsController] generateTts: Invalid library item ${req.params.id}: not a book`)
+      return res.status(400).send('Invalid library item: not a book')
+    }
+
+    // Chapter files are written next to the PDF, a single-file item has no folder of its own
+    if (req.libraryItem.isFile) {
+      return res.status(400).send('Invalid library item: must be in its own folder')
+    }
+
+    if (req.libraryItem.media.ebookFile?.ebookFormat !== 'pdf') {
+      return res.status(400).send('Invalid library item: no PDF ebook file')
+    }
+
+    const { voiceId, language, pagesPerChapter } = req.body || {}
+    if (!voiceId || typeof voiceId !== 'string') {
+      return res.status(400).send('Invalid request: voiceId is required')
+    }
+    if (language !== undefined && typeof language !== 'string') {
+      return res.status(400).send('Invalid request: language must be a string')
+    }
+    if (pagesPerChapter !== undefined && (!Number.isInteger(pagesPerChapter) || pagesPerChapter < 1)) {
+      return res.status(400).send('Invalid request: pagesPerChapter must be a positive integer')
+    }
+
+    if (this.ttsManager.getPendingTaskByLibraryItemId(req.libraryItem.id)) {
+      return res.status(400).send('Library item is already processing')
+    }
+    // Local engines usually take the whole GPU, so one TTS task at a time
+    if (this.ttsManager.pendingTasks.length) {
+      return res.status(400).send('TTS already running')
+    }
+
+    Logger.info(`[ToolsController] generateTts: Starting TTS for "${req.libraryItem.media.title}"`)
+    this.ttsManager.startTts(req.user.id, req.libraryItem, { voiceId, language, pagesPerChapter })
+
+    res.sendStatus(200)
+  }
+
+  /**
+   * DELETE: /api/tools/item/:id/tts
+   * Cancel a running TTS task
+   *
+   * @this import('../routers/ApiRouter')
+   *
+   * @param {RequestWithUser} req
+   * @param {Response} res
+   */
+  async cancelTts(req, res) {
+    const workerTask = this.ttsManager.getPendingTaskByLibraryItemId(req.params.id)
+    if (!workerTask) return res.sendStatus(404)
+
+    this.ttsManager.cancel(workerTask.task)
 
     res.sendStatus(200)
   }

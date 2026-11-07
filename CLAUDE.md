@@ -12,6 +12,14 @@ Fluxo em uma frase:
 
 ---
 
+## 0. Idioma: pt-BR primeiro
+
+- Público-alvo é brasileiro. Idioma padrão de TTS e clonagem: português (pt-BR).
+- Modelo da engine tem que suportar português E clonagem (Voicebox: Qwen3-TTS ou Chatterbox Multilingual). Validar sotaque brasileiro vs europeu no teste manual.
+- Amostra de clonagem gravada em pt-BR (o modelo copia timbre e prosódia da amostra).
+- Segmentação de frases respeita abreviações pt-BR (Sr., Sra., Dr., Prof., pág., nº, Av., Ltda., S.A.) e decimais com vírgula.
+- Toda string nova da UI vai em `client/strings/en-us.json` E `pt-br.json`.
+
 ## 1. Regras do fork
 
 - `master` espelha o upstream. Não commitar feature em `master`.

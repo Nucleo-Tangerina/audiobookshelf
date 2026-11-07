@@ -69,7 +69,7 @@
 
     <div class="w-full max-w-4xl mx-auto">
       <!-- queued alert -->
-      <widgets-alert v-if="isMetadataEmbedQueued" type="warning" class="mb-4">
+      <widgets-alert v-if="isMetadataEmbedQueued && !isTtsTool" type="warning" class="mb-4">
         <p class="text-lg">{{ $getString('MessageEmbedQueue', [queuedEmbedLIds.length]) }}</p>
       </widgets-alert>
       <!-- metadata embed action buttons -->
@@ -81,6 +81,21 @@
         <ui-btn v-if="!isTaskFinished" color="bg-primary" :loading="processing" :progress="progress" @click.stop="embedClick">{{ $strings.ButtonStartMetadataEmbed }}</ui-btn>
         <p v-else-if="taskFailed" class="text-error text-lg font-semibold">{{ $strings.MessageEmbedFailed }} {{ taskError }}</p>
         <p v-else class="text-success text-lg font-semibold">{{ $strings.MessageEmbedFinished }}</p>
+      </div>
+      <!-- tts generate from pdf -->
+      <div v-else-if="isTtsTool" class="w-full mb-4">
+        <div class="flex flex-wrap items-end -mx-2 mb-4">
+          <ui-dropdown v-model="ttsVoiceId" :items="ttsVoiceItems" :label="$strings.LabelVoice" :disabled="processing" class="m-2 max-w-xs" />
+          <ui-dropdown v-model="ttsLanguage" :items="ttsLanguageItems" :label="$strings.LabelLanguage" :disabled="processing" class="m-2 max-w-xs" />
+          <ui-text-input-with-label v-model="ttsPagesPerChapter" type="number" min="1" :label="$strings.LabelPagesPerChapter" :disabled="processing" class="m-2 max-w-40" />
+        </div>
+        <div class="flex items-center">
+          <div class="grow" />
+          <ui-btn v-if="!isTaskFinished && processing" color="bg-error" :loading="isCancelingEncode" class="mr-2" @click.stop="cancelTtsClick">{{ $strings.ButtonCancel }}</ui-btn>
+          <ui-btn v-if="!isTaskFinished" color="bg-primary" :loading="processing" :progress="progress" :disabled="!ttsVoiceId" @click.stop="generateTtsClick">{{ $strings.ButtonGenerateAudiobook }}</ui-btn>
+          <p v-else-if="taskFailed" class="text-error text-lg font-semibold">{{ $strings.MessageTtsFailed }} {{ taskError }}</p>
+          <p v-else class="text-success text-lg font-semibold">{{ $strings.MessageTtsFinished }}</p>
+        </div>
       </div>
       <!-- m4b embed action buttons -->
       <div v-else class="w-full flex items-center mb-4">
@@ -104,7 +119,7 @@
         <widgets-encoder-options-card ref="encoderOptionsCard" :audio-tracks="audioFiles" :disabled="processing || isTaskFinished" />
       </div>
 
-      <div class="mb-4">
+      <div v-if="!isTtsTool" class="mb-4">
         <div v-if="isEmbedTool" class="flex items-start mb-2">
           <span class="material-symbols text-base text-warning pt-1">star</span>
           <p class="text-gray-200 ml-2">{{ $strings.LabelEncodingInfoEmbedded }}</p>
@@ -141,7 +156,7 @@
       </div>
     </div>
 
-    <div class="w-full max-w-4xl mx-auto">
+    <div v-if="audioFiles.length" class="w-full max-w-4xl mx-auto">
       <p class="mb-2 font-semibold">{{ $strings.HeaderAudioTracks }}</p>
       <div class="w-full mx-auto border border-white/10 bg-bg">
         <div class="flex py-2 px-4 bg-primary/25">
@@ -205,7 +220,10 @@ export default {
       console.error('Invalid media type')
       return redirect('/?error=invalid media type')
     }
-    if (!libraryItem.media.audioFiles.length) {
+    const ttsStatus = await app.$axios.$get('/api/tools/tts/status').catch(() => null)
+    // TTS can generate audio for a PDF-only book, so it does not need audio files
+    const ttsAvailable = !!ttsStatus?.enabled && libraryItem.media.ebookFile?.ebookFormat === 'pdf'
+    if (!libraryItem.media.audioFiles.length && !ttsAvailable) {
       console.error('No audio files')
       return redirect('/?error=no audio files')
     }
@@ -216,7 +234,8 @@ export default {
     }
 
     return {
-      libraryItem
+      libraryItem,
+      ttsAvailable
     }
   },
   data() {
@@ -226,6 +245,10 @@ export default {
       selectedTool: 'embed',
       isCancelingEncode: false,
       shouldBackupAudioFiles: true,
+      ttsVoices: [],
+      ttsVoiceId: null,
+      ttsLanguage: 'pt',
+      ttsPagesPerChapter: 10,
       encodingOptions: {
         bitrate: '128k',
         channels: '2',
@@ -258,6 +281,18 @@ export default {
     isM4BTool() {
       return this.selectedTool === 'm4b'
     },
+    isTtsTool() {
+      return this.selectedTool === 'tts'
+    },
+    ttsVoiceItems() {
+      return this.ttsVoices.map((v) => ({ value: v.id, text: v.name }))
+    },
+    ttsLanguageItems() {
+      return [
+        { value: 'pt', text: 'Português (Brasil)' },
+        { value: 'en', text: 'English' }
+      ]
+    },
     libraryItemId() {
       return this.libraryItem.id
     },
@@ -280,10 +315,12 @@ export default {
       return this.media.chapters || []
     },
     availableTools() {
-      return [
-        { value: 'embed', text: this.$strings.LabelToolsEmbedMetadata },
-        { value: 'm4b', text: this.$strings.LabelToolsM4bEncoder }
-      ]
+      const tools = []
+      if (this.audioFiles.length) {
+        tools.push({ value: 'embed', text: this.$strings.LabelToolsEmbedMetadata }, { value: 'm4b', text: this.$strings.LabelToolsM4bEncoder })
+      }
+      if (this.ttsAvailable) tools.push({ value: 'tts', text: this.$strings.HeaderTtsGenerate })
+      return tools
     },
     taskFailed() {
       return this.isTaskFinished && this.task.isFailed
@@ -303,9 +340,13 @@ export default {
     encodeTask() {
       return this.tasks.find((t) => t.action === 'encode-m4b')
     },
+    ttsTask() {
+      return this.tasks.find((t) => t.action === 'tts-generate')
+    },
     task() {
       if (this.isEmbedTool) return this.embedTask
       else if (this.isM4BTool) return this.encodeTask
+      else if (this.isTtsTool) return this.ttsTask
       return null
     },
     taskRunning() {
@@ -372,6 +413,51 @@ export default {
           this.processing = false
         })
     },
+    cancelTtsClick() {
+      this.isCancelingEncode = true
+      this.$axios
+        .$delete(`/api/tools/item/${this.libraryItemId}/tts`)
+        .then(() => {
+          this.$toast.success(this.$strings.ToastTtsCancelSuccess)
+        })
+        .catch((error) => {
+          console.error('Failed to cancel tts', error)
+          this.$toast.error(this.$strings.ToastTtsCancelFailed)
+        })
+        .finally(() => {
+          this.isCancelingEncode = false
+        })
+    },
+    generateTtsClick() {
+      const payload = {
+        voiceId: this.ttsVoiceId,
+        language: this.ttsLanguage,
+        pagesPerChapter: Number(this.ttsPagesPerChapter) || 10
+      }
+      this.processing = true
+      this.$axios
+        .$post(`/api/tools/item/${this.libraryItemId}/tts`, payload)
+        .then(() => {
+          console.log('TTS generate started')
+        })
+        .catch((error) => {
+          var errorMsg = error.response ? error.response.data || 'Unknown Error' : 'Unknown Error'
+          this.$toast.error(errorMsg)
+          this.processing = false
+        })
+    },
+    fetchTtsVoices() {
+      this.$axios
+        .$get('/api/tools/tts/voices')
+        .then((data) => {
+          this.ttsVoices = data.voices || []
+          if (!this.ttsVoiceId && this.ttsVoices.length) this.ttsVoiceId = this.ttsVoices[0].id
+        })
+        .catch((error) => {
+          console.error('Failed to fetch tts voices', error)
+          this.$toast.error(this.$strings.MessageTtsEngineUnavailable)
+        })
+    },
     embedClick() {
       const payload = {
         message: this.$getString('MessageConfirmEmbedMetadataInAudioFiles', [this.audioFiles.length]),
@@ -402,13 +488,18 @@ export default {
     },
     init() {
       this.fetchMetadataEmbedObject()
-      if (this.$route.query.tool === 'm4b') {
-        if (this.availableTools.some((t) => t.value === 'm4b')) {
-          this.selectedTool = 'm4b'
+      if (this.$route.query.tool === 'm4b' || this.$route.query.tool === 'tts') {
+        if (this.availableTools.some((t) => t.value === this.$route.query.tool)) {
+          this.selectedTool = this.$route.query.tool
         } else {
           this.selectedToolUpdated()
         }
       }
+      if (!this.availableTools.some((t) => t.value === this.selectedTool)) {
+        this.selectedTool = this.availableTools[0].value
+        this.selectedToolUpdated()
+      }
+      if (this.ttsAvailable) this.fetchTtsVoices()
 
       if (this.task) this.taskUpdated(this.task)
 

@@ -89,6 +89,8 @@ export default {
           return `/audiobook/${task.data.libraryItemId}/manage?tool=m4b`
         case 'embed-metadata':
           return `/audiobook/${task.data.libraryItemId}/manage?tool=embed`
+        case 'tts-generate':
+          return `/audiobook/${task.data.libraryItemId}/manage?tool=tts`
         case 'scan-item':
           return `/item/${task.data.libraryItemId}`
         default:
