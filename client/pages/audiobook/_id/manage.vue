@@ -101,12 +101,13 @@
           <ui-dropdown v-model="ttsOutput" :items="ttsOutputItems" :label="$strings.LabelTtsOutput" :disabled="processing" class="m-2 max-w-xs" @input="ttsOutputChanged" />
           <ui-dropdown v-if="ttsOutput === 'podcast'" v-model="ttsPodcastItemId" :items="ttsPodcastItems" :label="$strings.LabelPodcast" :disabled="processing" class="m-2 max-w-xs" />
         </div>
-        <div class="flex items-center">
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- result of the last run stays visible, the button stays so the user can retry or regenerate -->
+          <p v-if="isTaskFinished && !processing && taskFailed" class="text-error text-lg font-semibold">{{ $strings.MessageTtsFailed }} {{ taskError }}</p>
+          <p v-else-if="isTaskFinished && !processing" class="text-success text-lg font-semibold">{{ $strings.MessageTtsFinished }}</p>
           <div class="grow" />
-          <ui-btn v-if="!isTaskFinished && processing" color="bg-error" :loading="isCancelingEncode" class="mr-2" @click.stop="cancelTtsClick">{{ $strings.ButtonCancel }}</ui-btn>
-          <ui-btn v-if="!isTaskFinished" color="bg-primary" :loading="processing" :progress="progress" :disabled="!ttsVoiceId || (ttsOutput === 'podcast' && !ttsPodcastItemId)" @click.stop="generateTtsClick">{{ $strings.ButtonGenerateAudiobook }}</ui-btn>
-          <p v-else-if="taskFailed" class="text-error text-lg font-semibold">{{ $strings.MessageTtsFailed }} {{ taskError }}</p>
-          <p v-else class="text-success text-lg font-semibold">{{ $strings.MessageTtsFinished }}</p>
+          <ui-btn v-if="processing" color="bg-error" :loading="isCancelingEncode" class="mr-2" @click.stop="cancelTtsClick">{{ $strings.ButtonCancel }}</ui-btn>
+          <ui-btn color="bg-primary" :loading="processing" :progress="progress" :disabled="!ttsVoiceId || (ttsOutput === 'podcast' && !ttsPodcastItemId)" @click.stop="generateTtsClick">{{ $strings.ButtonGenerateAudiobook }}</ui-btn>
         </div>
       </div>
       <!-- m4b embed action buttons -->
