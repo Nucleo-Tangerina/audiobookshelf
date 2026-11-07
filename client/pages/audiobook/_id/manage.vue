@@ -90,10 +90,19 @@
           <ui-text-input-with-label v-model="ttsPagesPerChapter" type="number" min="1" :label="$strings.LabelPagesPerChapter" :disabled="processing" class="m-2 max-w-40" />
         </div>
         <nuxt-link v-if="ttsVoicesLoaded && !ttsVoices.length" to="/config/voices" class="block mb-4 text-blue-400 hover:underline">{{ $strings.MessageNoVoicesCloneYours }}</nuxt-link>
+        <div class="flex flex-wrap items-end -mx-2 mb-4">
+          <ui-dropdown v-model="ttsBed" :items="ttsBedItems" :label="$strings.LabelBackgroundMusic" :disabled="processing" class="m-2 max-w-xs" />
+          <ui-file-input ref="ttsBedInput" accept=".mp3, .m4a, .wav, .ogg, .flac, .aac" class="m-2" @change="uploadTtsBed">{{ $strings.ButtonUploadBackgroundMusic }}</ui-file-input>
+          <ui-text-input-with-label v-model="ttsBedVolume" type="number" min="0" max="100" :label="$strings.LabelBackgroundMusicVolume" :disabled="processing || !ttsBed" class="m-2 max-w-40" />
+        </div>
+        <div class="flex flex-wrap items-end -mx-2 mb-4">
+          <ui-dropdown v-model="ttsOutput" :items="ttsOutputItems" :label="$strings.LabelTtsOutput" :disabled="processing" class="m-2 max-w-xs" @input="ttsOutputChanged" />
+          <ui-dropdown v-if="ttsOutput === 'podcast'" v-model="ttsPodcastItemId" :items="ttsPodcastItems" :label="$strings.LabelPodcast" :disabled="processing" class="m-2 max-w-xs" />
+        </div>
         <div class="flex items-center">
           <div class="grow" />
           <ui-btn v-if="!isTaskFinished && processing" color="bg-error" :loading="isCancelingEncode" class="mr-2" @click.stop="cancelTtsClick">{{ $strings.ButtonCancel }}</ui-btn>
-          <ui-btn v-if="!isTaskFinished" color="bg-primary" :loading="processing" :progress="progress" :disabled="!ttsVoiceId" @click.stop="generateTtsClick">{{ $strings.ButtonGenerateAudiobook }}</ui-btn>
+          <ui-btn v-if="!isTaskFinished" color="bg-primary" :loading="processing" :progress="progress" :disabled="!ttsVoiceId || (ttsOutput === 'podcast' && !ttsPodcastItemId)" @click.stop="generateTtsClick">{{ $strings.ButtonGenerateAudiobook }}</ui-btn>
           <p v-else-if="taskFailed" class="text-error text-lg font-semibold">{{ $strings.MessageTtsFailed }} {{ taskError }}</p>
           <p v-else class="text-success text-lg font-semibold">{{ $strings.MessageTtsFinished }}</p>
         </div>
@@ -251,6 +260,12 @@ export default {
       ttsVoiceId: null,
       ttsLanguage: 'pt',
       ttsPagesPerChapter: 10,
+      ttsBeds: [],
+      ttsBed: '',
+      ttsBedVolume: 15,
+      ttsOutput: 'audiobook',
+      ttsPodcasts: null,
+      ttsPodcastItemId: null,
       encodingOptions: {
         bitrate: '128k',
         channels: '2',
@@ -288,6 +303,18 @@ export default {
     },
     ttsVoiceItems() {
       return this.ttsVoices.map((v) => ({ value: v.id, text: v.name }))
+    },
+    ttsBedItems() {
+      return [{ value: '', text: this.$strings.LabelTtsBedNone }, ...this.ttsBeds.map((b) => ({ value: b.name, text: b.name }))]
+    },
+    ttsOutputItems() {
+      return [
+        { value: 'audiobook', text: this.$strings.LabelTtsOutputAudiobook },
+        { value: 'podcast', text: this.$strings.LabelPodcast }
+      ]
+    },
+    ttsPodcastItems() {
+      return (this.ttsPodcasts || []).map((li) => ({ value: li.id, text: li.media.metadata.title }))
     },
     ttsLanguageItems() {
       return [
@@ -434,7 +461,11 @@ export default {
       const payload = {
         voiceId: this.ttsVoiceId,
         language: this.ttsLanguage,
-        pagesPerChapter: Number(this.ttsPagesPerChapter) || 10
+        pagesPerChapter: Number(this.ttsPagesPerChapter) || 10,
+        bed: this.ttsBed || null,
+        bedVolume: Math.min(100, Math.max(0, Number(this.ttsBedVolume) || 0)) / 100,
+        output: this.ttsOutput,
+        podcastLibraryItemId: this.ttsOutput === 'podcast' ? this.ttsPodcastItemId : undefined
       }
       this.processing = true
       this.$axios
@@ -460,6 +491,38 @@ export default {
           console.error('Failed to fetch tts voices', error)
           this.$toast.error(this.$strings.MessageTtsEngineUnavailable)
         })
+    },
+    fetchTtsBeds() {
+      return this.$axios
+        .$get('/api/tools/tts/beds')
+        .then((data) => {
+          this.ttsBeds = data.beds || []
+        })
+        .catch((error) => {
+          console.error('Failed to fetch tts beds', error)
+        })
+    },
+    uploadTtsBed(file) {
+      const form = new FormData()
+      form.set('audio', file)
+      this.$axios
+        .$post('/api/tools/tts/beds', form)
+        .then(async (data) => {
+          await this.fetchTtsBeds()
+          this.ttsBed = data.name
+        })
+        .catch((error) => {
+          console.error('Failed to upload tts bed', error)
+          this.$toast.error(error.response?.data || this.$strings.MessageUploaderItemFailed)
+        })
+        .finally(() => this.$refs.ttsBedInput?.reset())
+    },
+    async ttsOutputChanged(output) {
+      if (output !== 'podcast' || this.ttsPodcasts) return
+      const podcastLibraries = this.$store.state.libraries.libraries.filter((lib) => lib.mediaType === 'podcast')
+      const results = await Promise.all(podcastLibraries.map((lib) => this.$axios.$get(`/api/libraries/${lib.id}/items?minified=1`).catch(() => null)))
+      this.ttsPodcasts = results.flatMap((r) => r?.results || [])
+      if (!this.ttsPodcastItemId && this.ttsPodcasts.length) this.ttsPodcastItemId = this.ttsPodcasts[0].id
     },
     embedClick() {
       const payload = {
@@ -502,7 +565,10 @@ export default {
         this.selectedTool = this.availableTools[0].value
         this.selectedToolUpdated()
       }
-      if (this.ttsAvailable) this.fetchTtsVoices()
+      if (this.ttsAvailable) {
+        this.fetchTtsVoices()
+        this.fetchTtsBeds()
+      }
 
       if (this.task) this.taskUpdated(this.task)
 

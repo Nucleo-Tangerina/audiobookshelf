@@ -1,57 +1,100 @@
+const Os = require('os')
+const Path = require('path')
 const { expect } = require('chai')
+const { Sequelize } = require('sequelize')
 const sinon = require('sinon')
 
+const fs = require('../../../server/libs/fsExtra')
+const Database = require('../../../server/Database')
 const ToolsController = require('../../../server/controllers/ToolsController')
-const ttsEngine = require('../../../server/utils/ttsEngine')
 const Logger = require('../../../server/Logger')
 
 describe('ToolsController', () => {
-  describe('createTtsVoice', () => {
-    let createVoiceStub
-    let res
+  describe('generateTts options', () => {
+    let originalMetadataPath
+    let originalEngineUrl
+    let router
+    let getExpandedById
+
+    before(async () => {
+      originalMetadataPath = global.MetadataPath
+      originalEngineUrl = process.env.TTS_ENGINE_URL
+      global.MetadataPath = await fs.mkdtemp(Path.join(Os.tmpdir(), 'abs-tts-'))
+      await fs.ensureDir(Path.join(global.MetadataPath, 'tts-beds'))
+      await fs.writeFile(Path.join(global.MetadataPath, 'tts-beds', 'bed.mp3'), '')
+      process.env.TTS_ENGINE_URL = 'http://engine'
+      Database.sequelize = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false })
+      Database.sequelize.uppercaseFirst = (str) => (str ? `${str[0].toUpperCase()}${str.substr(1)}` : '')
+      await Database.buildModels()
+    })
+
+    after(async () => {
+      await fs.remove(global.MetadataPath)
+      global.MetadataPath = originalMetadataPath
+      if (originalEngineUrl === undefined) delete process.env.TTS_ENGINE_URL
+      else process.env.TTS_ENGINE_URL = originalEngineUrl
+    })
 
     beforeEach(() => {
-      process.env.TTS_ENGINE_URL = 'http://voicebox.test'
-      createVoiceStub = sinon.stub(ttsEngine, 'createVoice').resolves({ id: 'v1', name: 'Minha voz' })
+      sinon.stub(Logger, 'info')
       sinon.stub(Logger, 'error')
-      res = { status: sinon.stub().returnsThis(), send: sinon.stub(), json: sinon.stub() }
+      router = { ttsManager: { pendingTasks: [], getPendingTaskByLibraryItemId: () => null, startTts: sinon.spy() } }
+      getExpandedById = sinon.stub(Database.libraryItemModel, 'getExpandedById').resolves(null)
     })
 
-    afterEach(() => {
-      delete process.env.TTS_ENGINE_URL
-      sinon.restore()
+    afterEach(() => sinon.restore())
+
+    async function post(body) {
+      const req = {
+        params: { id: 'book1' },
+        user: { id: 'user1', checkCanAccessLibraryItem: () => true },
+        libraryItem: { id: 'book1', isBook: true, isFile: false, media: { title: 'Book', ebookFile: { ebookFormat: 'pdf' } } },
+        body: { voiceId: 'v1', ...body }
+      }
+      const res = { statusCode: 200, status: sinon.stub(), send: sinon.stub(), sendStatus: sinon.stub() }
+      res.status.callsFake((code) => {
+        res.statusCode = code
+        return res
+      })
+      res.sendStatus.callsFake((code) => (res.statusCode = code))
+      await ToolsController.generateTts.call(router, req, res)
+      return res
+    }
+
+    it('defaults to audiobook output without bed', async () => {
+      const res = await post({})
+      expect(res.statusCode).to.equal(200)
+      const options = router.ttsManager.startTts.firstCall.args[2]
+      expect(options).to.include({ bedPath: null, bedVolume: 0.15, podcastLibraryItem: null })
     })
 
-    const audio = { name: 'sample.webm', mimetype: 'audio/webm', size: 1000, truncated: false }
-
-    it('rejects without consent', async () => {
-      await ToolsController.createTtsVoice({ body: { name: 'Minha voz' }, files: { audio }, user: {} }, res)
-      expect(res.status.calledWith(400)).to.be.true
-      expect(createVoiceStub.called).to.be.false
+    it('accepts an existing bed and volume', async () => {
+      const res = await post({ bed: 'bed.mp3', bedVolume: 0.3 })
+      expect(res.statusCode).to.equal(200)
+      const options = router.ttsManager.startTts.firstCall.args[2]
+      expect(options.bedPath).to.equal(Path.join(Path.resolve(global.MetadataPath, 'tts-beds'), 'bed.mp3'))
+      expect(options.bedVolume).to.equal(0.3)
     })
 
-    it('rejects when consent is not "true"', async () => {
-      await ToolsController.createTtsVoice({ body: { name: 'Minha voz', consent: 'false' }, files: { audio }, user: {} }, res)
-      expect(res.status.calledWith(400)).to.be.true
-      expect(createVoiceStub.called).to.be.false
+    it('rejects bad bed, volume and output', async () => {
+      for (const body of [{ bed: 'missing.mp3' }, { bed: '../bed.mp3' }, { bed: 5 }, { bedVolume: 1.5 }, { bedVolume: -0.1 }, { bedVolume: '0.2' }, { output: 'video' }, { output: 'podcast' }]) {
+        const res = await post(body)
+        expect(res.statusCode, JSON.stringify(body)).to.equal(400)
+      }
+      expect(router.ttsManager.startTts.called).to.be.false
     })
 
-    it('rejects without an audio file', async () => {
-      await ToolsController.createTtsVoice({ body: { name: 'Minha voz', consent: 'true' }, files: null, user: {} }, res)
-      expect(res.status.calledWith(400)).to.be.true
-      expect(createVoiceStub.called).to.be.false
-    })
+    it('requires a podcast library item for podcast output', async () => {
+      getExpandedById.withArgs('book2').resolves({ id: 'book2', mediaType: 'book', media: {} })
+      getExpandedById.withArgs('pod1').resolves({ id: 'pod1', mediaType: 'podcast', media: {}, path: '/podcasts/pod1' })
 
-    it('rejects a non-audio file', async () => {
-      await ToolsController.createTtsVoice({ body: { name: 'Minha voz', consent: 'true' }, files: { audio: { ...audio, mimetype: 'application/pdf' } }, user: {} }, res)
-      expect(res.status.calledWith(400)).to.be.true
-      expect(createVoiceStub.called).to.be.false
-    })
+      expect((await post({ output: 'podcast', podcastLibraryItemId: 'nope' })).statusCode).to.equal(400)
+      expect((await post({ output: 'podcast', podcastLibraryItemId: 'book2' })).statusCode).to.equal(400)
+      expect(router.ttsManager.startTts.called).to.be.false
 
-    it('rejects a file over the size limit', async () => {
-      await ToolsController.createTtsVoice({ body: { name: 'Minha voz', consent: 'true' }, files: { audio: { ...audio, size: 21 * 1024 * 1024 } }, user: {} }, res)
-      expect(res.status.calledWith(400)).to.be.true
-      expect(createVoiceStub.called).to.be.false
+      const res = await post({ output: 'podcast', podcastLibraryItemId: 'pod1' })
+      expect(res.statusCode).to.equal(200)
+      expect(router.ttsManager.startTts.firstCall.args[2].podcastLibraryItem.id).to.equal('pod1')
     })
   })
 })
