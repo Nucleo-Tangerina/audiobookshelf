@@ -1,6 +1,9 @@
 const { expect } = require('chai')
+const sinon = require('sinon')
+const axios = require('axios')
 
-const { getWavDuration } = require('../../../server/utils/ttsEngine')
+const Logger = require('../../../server/Logger')
+const { getWavDuration, listVoices } = require('../../../server/utils/ttsEngine')
 
 function makeWav({ sampleRate = 24000, channels = 1, bitsPerSample = 16, seconds = 1.5, extraChunk = false, dataSizeOverride = null } = {}) {
   const byteRate = (sampleRate * channels * bitsPerSample) / 8
@@ -27,6 +30,30 @@ function makeWav({ sampleRate = 24000, channels = 1, bitsPerSample = 16, seconds
 }
 
 describe('ttsEngine', () => {
+  describe('listVoices', () => {
+    afterEach(() => sinon.restore())
+
+    it('creates the missing pt-BR presets and lists them with existing profiles', async () => {
+      const dora = { id: 'p1', name: 'Dora', preset_engine: 'kokoro', preset_voice_id: 'pf_dora' }
+      sinon.stub(axios, 'get').resolves({ data: [{ id: 'c1', name: 'Minha voz', voice_type: 'cloned' }, dora] })
+      const post = sinon.stub(axios, 'post').resolves({ data: { id: 'p2', name: 'Alex (pt-BR, masculina)' } })
+
+      const voices = await listVoices()
+
+      expect(post.calledOnce).to.be.true
+      expect(post.firstCall.args[1]).to.include({ preset_voice_id: 'pm_alex', preset_engine: 'kokoro', voice_type: 'preset', language: 'pt' })
+      expect(voices.map((v) => v.id)).to.deep.equal(['c1', 'p1', 'p2'])
+    })
+
+    it('still lists voices when the engine rejects presets', async () => {
+      sinon.stub(Logger, 'warn')
+      sinon.stub(axios, 'get').resolves({ data: [{ id: 'c1', name: 'Minha voz' }] })
+      sinon.stub(axios, 'post').rejects(new Error('400'))
+
+      expect(await listVoices()).to.deep.equal([{ id: 'c1', name: 'Minha voz' }])
+    })
+  })
+
   describe('getWavDuration', () => {
     it('computes duration from data size and byte rate', () => {
       expect(getWavDuration(makeWav({ seconds: 1.5 }))).to.equal(1.5)

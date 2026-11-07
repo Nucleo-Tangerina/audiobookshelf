@@ -1,4 +1,5 @@
 const axios = require('axios')
+const Logger = require('../Logger')
 
 // Contract from jamiepine/voicebox backend/routes/generations.py (POST /generate/stream), backend/routes/profiles.py (GET /profiles), backend/models.py
 // Voicebox picks the profile's default engine (Qwen3-TTS "qwen" for cloned voices), which supports language "pt"
@@ -11,12 +12,33 @@ function getHeaders() {
   return process.env.TTS_ENGINE_API_KEY ? { Authorization: `Bearer ${process.env.TTS_ENGINE_API_KEY}` } : {}
 }
 
+// Ready-made pt-BR voices, so there is something to pick before the user clones their own.
+// Kokoro voice ids from jamiepine/voicebox backend/backends/kokoro_backend.py; preset profile fields from backend/models.py (VoiceProfileCreate)
+const PRESET_VOICES = [
+  { name: 'Dora (pt-BR, feminina)', preset_voice_id: 'pf_dora' },
+  { name: 'Alex (pt-BR, masculina)', preset_voice_id: 'pm_alex' }
+]
+module.exports.PRESET_VOICES = PRESET_VOICES
+
 /**
+ * Lists engine voice profiles, creating the missing pt-BR presets first
+ *
  * @returns {Promise<{id:string, name:string}[]>}
  */
 async function listVoices() {
   const response = await axios.get(`${getBaseUrl()}/profiles`, { headers: getHeaders(), timeout: 15000 })
-  return response.data.map((p) => ({ id: p.id, name: p.name }))
+  const profiles = response.data
+  for (const preset of PRESET_VOICES) {
+    if (profiles.some((p) => p.preset_engine === 'kokoro' && p.preset_voice_id === preset.preset_voice_id)) continue
+    try {
+      const created = await axios.post(`${getBaseUrl()}/profiles`, { ...preset, language: 'pt', voice_type: 'preset', preset_engine: 'kokoro' }, { headers: getHeaders(), timeout: 15000 })
+      profiles.push(created.data)
+    } catch (error) {
+      // Older Voicebox without Kokoro presets: still list the voices that exist
+      Logger.warn(`[ttsEngine] Could not create preset voice "${preset.name}": ${error.response?.data?.detail || error.message}`)
+    }
+  }
+  return profiles.map((p) => ({ id: p.id, name: p.name }))
 }
 module.exports.listVoices = listVoices
 
